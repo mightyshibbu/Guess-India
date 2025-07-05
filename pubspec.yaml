@@ -10,6 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.2
+  sensors_plus: 6.1.1
+  audioplayers: ^5.2.1
+  shared_preferences: ^2.2.2
+  vector_math: ^2.1.4
+  share_plus: ^11.0.0
 
 dev_dependencies:
   flutter_test:
@@ -20,3 +25,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/sounds/

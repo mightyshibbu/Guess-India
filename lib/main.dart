@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
+import 'package:party_charades/screens/loading_screen.dart';
+import 'package:party_charades/screens/home_screen.dart';
+import 'package:party_charades/screens/deck_detail_screen.dart';
+import 'package:party_charades/screens/game_screen.dart';
+import 'package:party_charades/screens/results_screen.dart';
+import 'package:party_charades/screens/settings_screen.dart';
 
 void main() {
   runApp(const PartyCharadesApp());
@@ -13,10 +18,19 @@ class PartyCharadesApp extends StatelessWidget {
     return MaterialApp(
       title: 'Party Charades',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const HomeScreen(),
+      initialRoute: LoadingScreen.routeName,
+      routes: {
+        LoadingScreen.routeName: (context) => const LoadingScreen(),
+        HomeScreen.routeName: (context) => const HomeScreen(),
+        DeckDetailScreen.routeName: (context) => const DeckDetailScreen(),
+        GameScreen.routeName: (context) => const GameScreen(),
+        ResultsScreen.routeName: (context) => const ResultsScreen(),
+        SettingsScreen.routeName: (context) => const SettingsScreen(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }
