@@ -58,6 +58,34 @@ class HomeScreen extends StatelessWidget {
         icon: Icons.sports_soccer,
         color: const Color(0xFFFFD166),
       ),
+      Deck(
+        id: '7',
+        title: 'Science',
+        description: 'Scientific terms and discoveries',
+        icon: Icons.science,
+        color: const Color(0xFF8E44AD),
+      ),
+      Deck(
+        id: '8',
+        title: 'Geography',
+        description: 'Countries, capitals, and landmarks',
+        icon: Icons.public,
+        color: const Color(0xFF3498DB),
+      ),
+      Deck(
+        id: '9',
+        title: 'Music',
+        description: 'Songs, artists, and instruments',
+        icon: Icons.music_note,
+        color: const Color(0xFF2ECC71),
+      ),
+      Deck(
+        id: '10',
+        title: 'History',
+        description: 'Historical events and figures',
+        icon: Icons.history_edu,
+        color: const Color(0xFFE67E22),
+      ),
     ];
 
     return Scaffold(
@@ -107,12 +135,12 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Expanded(
                 child: GridView.builder(
-                  padding: const EdgeInsets.only(bottom: 24),
+                  padding: const EdgeInsets.only(bottom: 8),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: crossAxisCount,
                     childAspectRatio: aspectRatio,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
                   ),
                   itemCount: decks.length,
                   itemBuilder: (context, index) {
@@ -121,6 +149,17 @@ class HomeScreen extends StatelessWidget {
                   },
                 ),
               ),
+              const SizedBox(height: 16),
+              // Bottom Button Bar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _HomeBottomButton(label: 'VIP', icon: Icons.star, onTap: () {}),
+                  _HomeBottomButton(label: 'DECK', icon: Icons.layers, onTap: () {}),
+                  _HomeBottomButton(label: 'CUSTOM', icon: Icons.edit, onTap: () {}),
+                ],
+              ),
+              const SizedBox(height: 12),
             ],
           ),
         ),
@@ -143,46 +182,104 @@ class HomeScreen extends StatelessWidget {
             arguments: {'deck': deck},
           );
         },
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: deck.color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          height: 150,
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: deck.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: deck.color.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    deck.icon,
+                    size: 28,
+                    color: deck.color,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  deck.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${deck.words.length} words',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.black54,
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: deck.color.withOpacity(0.2),
-                  shape: BoxShape.circle,
+        ),
+      ),
+    );
+  }
+}
+
+
+class _HomeBottomButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HomeBottomButton({required this.label, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6.0),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          splashColor: Theme.of(context).primaryColor.withOpacity(0.2),
+          highlightColor: Colors.transparent,
+          child: Ink(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.10),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
-                child: Icon(
-                  deck.icon,
-                  size: 32,
-                  color: deck.color,
-                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, color: Colors.black87, size: 24),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                deck.title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${deck.words.length} words',
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black54,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

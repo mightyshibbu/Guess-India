@@ -6,7 +6,14 @@ import 'package:party_charades/screens/game_screen.dart';
 import 'package:party_charades/screens/results_screen.dart';
 import 'package:party_charades/screens/settings_screen.dart';
 
-void main() {
+import 'package:flutter/services.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(const PartyCharadesApp());
 }
 
