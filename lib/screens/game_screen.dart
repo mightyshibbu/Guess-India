@@ -3,6 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
+import 'package:vibration/vibration.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:party_charades/models/deck.dart';
 import 'package:party_charades/screens/results_screen.dart';
 
@@ -15,7 +18,32 @@ class GameScreen extends StatefulWidget {
   _GameScreenState createState() => _GameScreenState();
 }
 
+enum TiltState { idle, up, down }
+
 class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
+  // Dedicated player for last_seconds sound
+  final AudioPlayer _lastSecondsPlayer = AudioPlayer();
+  bool _isLastSecondsPlaying = false;
+  DateTime _lastTiltTime = DateTime.fromMillisecondsSinceEpoch(0);
+  // --- Hysteresis thresholds (angles in g, assuming -10 to 10 is -90° to 90°) ---
+  // These are now computed using _tiltSensitivity for easier tuning
+  double get CORRECT_ENGAGE => -_tiltSensitivity;
+  double get CORRECT_DISENGAGE => -(_tiltSensitivity - 3.0); // Require much closer to neutral before re-engage (tighter hysteresis)
+
+  double get SKIP_ENGAGE => _tiltSensitivity;
+  double get SKIP_DISENGAGE => _tiltSensitivity - 3.0; // Require back to near-neutral before re-engage
+
+  // Hysteresis engagement flags
+  bool _isCorrectEngaged = false;
+  bool _isSkipEngaged = false;
+  TiltState _tiltState = TiltState.idle;
+  // Sensitivity for tilt detection (default, can be customized)
+  double _tiltSensitivity = 9.8; // Default for 90° tilt, can be customized
+  // For color flash effect
+  Color? _flashColor;
+  Timer? _flashTimer;
+  // Guard for late init
+  bool _gameInitialized = false;
   // Game state
   late final Deck _deck;
   late final int _duration;
@@ -40,7 +68,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   // Tilt feedback state
   bool _isTiltedUp = false;
   bool _isTiltedDown = false;
-  DateTime? _lastTiltTime;
+
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   
   // Audio
@@ -49,12 +77,14 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   
   // Results
   final Map<String, bool> _wordResults = {}; // word -> isCorrect
+  // Prevent repeated scoring for the same word
+  bool _hasScoredThisWord = false;
   
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeGame();
+    // _initializeGame(); // Removed from here, will be called in didChangeDependencies
   }
   
   @override
@@ -63,7 +93,16 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     _countdownTimer.cancel();
     _accelerometerSubscription?.cancel();
     _audioPlayer.dispose();
+    _lastSecondsPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    // Restore orientation to system default
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    _flashTimer?.cancel();
     super.dispose();
   }
   
@@ -80,7 +119,25 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // No need to reinitialize here as we're already doing it in initState
+    // Lock orientation to landscape
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    // Load sensitivity from SharedPreferences
+    _loadSensitivity();
+    // Only initialize game once
+    if (!_gameInitialized) {
+      _initializeGame();
+      _gameInitialized = true;
+    }
+  }
+
+  Future<void> _loadSensitivity() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _tiltSensitivity = prefs.getDouble('tilt_sensitivity') ?? 9.8;
+    });
   }
 
   @override
@@ -128,13 +185,29 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       _remainingWords.clear();
       _remainingWords.addAll(_deck.words..shuffle());
       _nextWord();
+      _isLastSecondsPlaying = false;
+      _lastSecondsPlayer.stop();
     });
 
-    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (_timeRemaining > 0) {
         setState(() {
           _timeRemaining--;
         });
+        // Play last_seconds.mp3 when time is 10 or less and not already playing
+        if (_timeRemaining <= 10 && _timeRemaining > 0 && !_isLastSecondsPlaying) {
+          _isLastSecondsPlaying = true;
+          try {
+            await _lastSecondsPlayer.setReleaseMode(ReleaseMode.loop);
+            await _lastSecondsPlayer.play(AssetSource('sounds/last_seconds.mp3'));
+          } catch (e) {
+            debugPrint('Error playing last_seconds: $e');
+          }
+        } else if ((_timeRemaining > 10 || _timeRemaining == 0) && _isLastSecondsPlaying) {
+          // Stop if time is above 10 or timer ended
+          _isLastSecondsPlaying = false;
+          await _lastSecondsPlayer.stop();
+        }
       } else {
         _endGame();
       }
@@ -151,64 +224,107 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       _onAccelerometerEvent(event);
     });
   }
-
+  
   void _onAccelerometerEvent(AccelerometerEvent event) {
-    // Simple tilt detection using Z-axis (when holding phone to forehead)
-    // Z axis: -10 (flat) to 10 (upside down)
-    // We'll consider tilt up when Z < -5 and tilt down when Z > 5
     if (!_isGameStarted || _isCountdown || _isGameOver) return;
-    
+
     final double z = event.z;
+    debugPrint('Accelerometer z: ' + z.toStringAsFixed(2));
     final now = DateTime.now();
-    
-    // Debounce to prevent multiple rapid triggers
-    if (_lastTiltTime != null && now.difference(_lastTiltTime!) < const Duration(milliseconds: 500)) {
-      return;
-    }
-    
-    if (z < -5) {
-      // Tilt up - Correct
-      setState(() {
-        _isTiltedUp = true;
-        _isTiltedDown = false;
-      });
-      _onCorrect();
-      _lastTiltTime = now;
-      
-      // Reset tilt feedback after animation
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          setState(() {
-            _isTiltedUp = false;
-          });
-        }
-      });
-    } else if (z > 5) {
-      // Tilt down - Skip
-      setState(() {
-        _isTiltedDown = true;
-        _isTiltedUp = false;
-      });
-      _onSkip();
-      _lastTiltTime = now;
-      
-      // Reset tilt feedback after animation
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          setState(() {
-            _isTiltedDown = false;
-          });
-        }
-      });
-    } else {
-      // Reset tilt state when device is level
-      if (_isTiltedUp || _isTiltedDown) {
+
+    // --- Correct (tilt up) logic ---
+    if (!_isCorrectEngaged && z < CORRECT_ENGAGE && !_hasScoredThisWord) {
+      // Engage correct only if not already engaged, not already scored for this word, and after cooldown
+      if (now.difference(_lastTiltTime).inMilliseconds >= 1000) {
+        debugPrint('Correct triggered at: ' + now.toIso8601String());
         setState(() {
-          _isTiltedUp = false;
+          _tiltState = TiltState.up;
+          _isTiltedUp = true;
           _isTiltedDown = false;
+          _isCorrectEngaged = true;
+          _hasScoredThisWord = true;
+        });
+        _onCorrect();
+        _lastTiltTime = now;
+        _flashBackground(Colors.greenAccent);
+        Vibration.hasVibrator().then((hasVibrator) {
+          if (hasVibrator ?? false) {
+            Vibration.vibrate(duration: 100);
+          }
+        });
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            setState(() {
+              _isTiltedUp = false;
+            });
+          }
         });
       }
+    } else if (_isCorrectEngaged && z > CORRECT_DISENGAGE) {
+      // Disengage correct (require back to near-neutral)
+      setState(() {
+        _isCorrectEngaged = false;
+        if (!_isSkipEngaged) {
+          _tiltState = TiltState.idle;
+          _isTiltedUp = false;
+          _isTiltedDown = false;
+        }
+      });
     }
+
+    // --- Skip (tilt down) logic ---
+    if (!_isSkipEngaged && z > SKIP_ENGAGE) {
+      // Engage skip only if not already engaged and after cooldown
+      if (now.difference(_lastTiltTime).inMilliseconds >= 1000) {
+        debugPrint('Skip triggered at: ' + now.toIso8601String());
+        setState(() {
+          _tiltState = TiltState.down;
+          _isTiltedDown = true;
+          _isTiltedUp = false;
+          _isSkipEngaged = true;
+        });
+        _onSkip();
+        _lastTiltTime = now;
+        _flashBackground(Colors.orangeAccent);
+        Vibration.hasVibrator().then((hasVibrator) {
+          if (hasVibrator ?? false) {
+            Vibration.vibrate(duration: 100);
+          }
+        });
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            setState(() {
+              _isTiltedDown = false;
+            });
+          }
+        });
+      }
+    } else if (_isSkipEngaged && z < SKIP_DISENGAGE) {
+      // Disengage skip (require back to near-neutral)
+      setState(() {
+        _isSkipEngaged = false;
+        if (!_isCorrectEngaged) {
+          _tiltState = TiltState.idle;
+          _isTiltedUp = false;
+          _isTiltedDown = false;
+        }
+      });
+    }
+  }
+
+
+  void _flashBackground(Color color) {
+    setState(() {
+      _flashColor = color;
+    });
+    _flashTimer?.cancel();
+    _flashTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _flashColor = null;
+        });
+      }
+    });
   }
 
   Future<void> _playSound(String sound) async {
@@ -243,6 +359,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     if (_remainingWords.isNotEmpty) {
       _currentWord = _remainingWords.removeLast();
       _wordResults[_currentWord] = false;
+      _hasScoredThisWord = false; // Reset for new word
     } else {
       _endGame();
     }
@@ -250,6 +367,8 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
 
   void _endGame() {
     _gameTimer.cancel();
+    _lastSecondsPlayer.stop();
+    _isLastSecondsPlaying = false;
     setState(() {
       _isGameOver = true;
       _isGameStarted = false;
@@ -294,35 +413,16 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     }
   }
 
-  // end of _resumeGame
-
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final isPortrait = screenSize.height > screenSize.width;
     
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Party Charades'),
-          actions: [
-            if (_isGameStarted && !_isCountdown)
-              IconButton(
-                icon: const Icon(Icons.pause),
-                onPressed: _pauseGame,
-              ),
-            IconButton(
-              icon: Icon(_isSoundOn ? Icons.volume_up : Icons.volume_off),
-              onPressed: () {
-                setState(() {
-                  _isSoundOn = !_isSoundOn;
-                });
-              },
-            ),
-          ],
-        ),
-        body: SafeArea(
+    return Scaffold(
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        color: _flashColor ?? Theme.of(context).scaffoldBackgroundColor,
+        child: SafeArea(
           child: _buildGameContent(),
         ),
       ),
@@ -355,146 +455,143 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
 
   Widget _buildGameContent() {
     if (_isCountdown) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text(
-            'Starting in',
-            style: TextStyle(
-              color: Colors.black54,
-              fontSize: 24,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 24),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            transitionBuilder: (Widget child, Animation<double> animation) {
-              return ScaleTransition(
-                scale: Tween<double>(begin: 0.5, end: 1.0).animate(
-                  CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.elasticOut,
-                  ),
-                ),
-                child: FadeTransition(
-                  opacity: animation,
-                  child: child,
-                ),
-              );
-            },
-            child: Container(
-              key: ValueKey<int>(_countdownValue),
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: const Color(0xFF45B7D1).withOpacity(0.1),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFF45B7D1),
-                  width: 3,
-                ),
+      return Center(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: Container(
+            key: ValueKey<int>(_countdownValue),
+            width: 140,
+            height: 140,
+            decoration: BoxDecoration(
+              color: const Color(0xFF45B7D1).withOpacity(0.08),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: const Color(0xFF45B7D1),
+                width: 4,
               ),
-              child: Center(
-                child: Text(
-                  '$_countdownValue',
-                  style: const TextStyle(
-                    fontSize: 56,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF45B7D1),
-                  ),
+            ),
+            child: Center(
+              child: Text(
+                '$_countdownValue',
+                style: const TextStyle(
+                  fontSize: 64,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF45B7D1),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 32),
-          const Text(
-            'Get ready to act!',
-            style: TextStyle(
-              color: Colors.black54,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+        ),
       );
     } else if (_isGameOver) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text(
-            'Game Over!',
-            style: TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF45B7D1),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF45B7D1)),
-            strokeWidth: 2,
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Calculating results...',
-            style: TextStyle(
-              color: Colors.black54,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 40),
-          SizedBox(
-            width: 200,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B6B),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: const Text(
-                'Back to Home',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    } else if (!_isGameStarted) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'The word is...',
+              "Time's Up!",
+              style: TextStyle(
+                fontSize: 40,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFFC107),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFC107)),
+              strokeWidth: 3,
+            ),
+            const SizedBox(height: 32),
+            const Text(
+              'Calculating results...',
               style: TextStyle(
                 color: Colors.black54,
                 fontSize: 20,
                 fontWeight: FontWeight.w500,
               ),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
+          ],
+        ),
+      );
+    } else if (_isGameStarted) {
+      // Gameplay UI: Only timer, score, and word
+      return Stack(
+        children: [
+          // Timer at top left
+          Positioned(
+            top: 32,
+            left: 32,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.08),
-                    blurRadius: 20,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Text(
+                '$_timeRemaining',
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF45B7D1),
+                ),
+              ),
+            ),
+          ),
+          // Score at top right
+          Positioned(
+            top: 32,
+            right: 32,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.star, color: Color(0xFFFFC107), size: 28),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$_score',
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFFC107),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Word in center
+          Center(
+            child: Container(
+              width: 430,
+              padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 28),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.10),
+                    blurRadius: 24,
                     offset: const Offset(0, 10),
                   ),
                 ],
@@ -503,140 +600,20 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 _currentWord,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: _currentWord.length > 12 ? 32 : 48,
+                  fontSize: _currentWord.length > 12 ? 38 : 56,
                   fontWeight: FontWeight.bold,
                   color: const Color(0xFF333333),
-                  letterSpacing: 0.5,
-                  height: 1.2,
+                  letterSpacing: 1.2,
+                  height: 1.1,
                 ),
               ),
-            ),
-            const SizedBox(height: 40),
-            SizedBox(
-              width: 200,
-              child: ElevatedButton(
-                onPressed: _startGame,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4ECDC4),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: const Text(
-                  'Start Game',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    } else {
-      return Column(
-        children: [
-          // Score and timer
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Score: $_score',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  'Time: $_timeRemaining',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: _timeRemaining <= 10 ? Colors.red : null,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Current word
-          Expanded(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Text(
-                  _currentWord,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          
-          // Instructions
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Tilt device up for correct, down to skip',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ),
-          
-          // Tilt indicators
-          Padding(
-            padding: const EdgeInsets.only(bottom: 32.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildTiltIndicator('↑ Correct', _isTiltedUp),
-                const SizedBox(width: 32),
-                _buildTiltIndicator('↓ Skip', _isTiltedDown),
-              ],
             ),
           ),
         ],
       );
+    } else {
+      return const SizedBox.shrink();
     }
-  }
-  // Build a tilt indicator widget
-  Widget _buildTiltIndicator(String label, bool isActive) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isActive ? Colors.blue[100] : Colors.grey[200],
-            shape: BoxShape.circle,
-          ),
-          child: Text(
-            label.split(' ')[0],
-            style: TextStyle(
-              fontSize: 24,
-              color: isActive ? Colors.blue[800] : Colors.grey[600],
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label.split(' ')[1],
-          style: TextStyle(
-            color: isActive ? Colors.blue[800] : Colors.grey[600],
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildStatChip(String label, Color color, IconData icon) {

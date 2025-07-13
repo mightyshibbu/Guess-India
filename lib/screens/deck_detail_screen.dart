@@ -96,55 +96,68 @@ class _DeckDetailScreenState extends State<DeckDetailScreen> with SingleTickerPr
         title: const Text('Deck Details'),
         elevation: 0,
       ),
-      body: CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              expandedHeight: 200.0,
-              pinned: true,
-              backgroundColor: _deck.color.withOpacity(0.1),
-              elevation: 0,
-              leading: IconButton(
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.arrow_back, color: Colors.black87),
-                ),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-              flexibleSpace: FlexibleSpaceBar(
-                title: Text(
-                  _deck.title,
-                  style: const TextStyle(
-                    color: Colors.black87,
-                    fontWeight: FontWeight.bold,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Deck header (previously SliverAppBar)
+              Container(
+                height: 200.0,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      _deck.color.withOpacity(0.1),
+                      _deck.color.withOpacity(0.3),
+                    ],
                   ),
                 ),
-                background: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        _deck.color.withOpacity(0.1),
-                        _deck.color.withOpacity(0.3),
-                      ],
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Icon(
+                        _deck.icon,
+                        size: 80,
+                        color: _deck.color,
+                      ),
                     ),
-                  ),
-                  child: Center(
-                    child: Icon(
-                      _deck.icon,
-                      size: 80,
-                      color: _deck.color,
+                    Positioned(
+                      top: 16,
+                      left: 8,
+                      child: IconButton(
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.arrow_back, color: Colors.black87),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                     ),
-                  ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 16,
+                      child: Center(
+                        child: Text(
+                          _deck.title,
+                          style: const TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            SliverToBoxAdapter(
-              child: AnimatedBuilder(
+              AnimatedBuilder(
                 animation: _animationController,
                 builder: (context, child) {
                   return Transform.translate(
@@ -189,126 +202,132 @@ class _DeckDetailScreenState extends State<DeckDetailScreen> with SingleTickerPr
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _deck.title,
-                                        style: theme.textTheme.headlineSmall?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
+                                      children: [
+                                        Text(
+                                          _deck.title,
+                                          style: theme.textTheme.headlineSmall?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${_deck.words.length} words',
-                                        style: theme.textTheme.bodyMedium?.copyWith(
-                                          color: Colors.black54,
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${_deck.words.length} words',
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            color: Colors.black54,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _deck.description,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: Colors.black87,
+                                ],
                               ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _deck.description,
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      // Duration Selector
+                      Text(
+                        'Game Duration',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildDurationSelector(),
+                      const SizedBox(height: 40),
+                      // Start Game Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: ElevatedButton(
+                          onPressed: _startGame,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _deck.color,
+                            foregroundColor: Colors.white,
+                            elevation: 4,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 32),
-                    
-                    // Duration Selector
-                    Text(
-                      'Game Duration',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDurationSelector(),
-                    
-                    const SizedBox(height: 40),
-                    
-                    // Start Game Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: _startGame,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _deck.color,
-                          foregroundColor: Colors.white,
-                          elevation: 4,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text(
-                          'Start Game',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                          child: const Text(
+                            'Start Game',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(height: 24),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
   
   Widget _buildDurationSelector() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: _durationOptions.map((duration) {
-          final isSelected = duration == _selectedDuration;
-          return Padding(
-            padding: const EdgeInsets.only(right: 12.0),
-            child: ChoiceChip(
-              label: Text(
-                '$duration\nsec',
-                textAlign: TextAlign.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Timer: $_selectedDuration sec',
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black87,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
                 ),
               ),
-              selected: isSelected,
-              onSelected: (selected) {
-                if (selected) {
-                  setState(() {
-                    _selectedDuration = duration;
-                  });
-                }
-              },
-              backgroundColor: Colors.grey[200],
-              selectedColor: _deck.color,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
+            ],
+          ),
+        ),
+        Slider(
+          value: _selectedDuration.toDouble(),
+          min: _durationOptions.first.toDouble(),
+          max: _durationOptions.last.toDouble(),
+          divisions: _durationOptions.length - 1,
+          label: '$_selectedDuration sec',
+          activeColor: _deck.color,
+          onChanged: (double value) {
+            setState(() {
+              _selectedDuration = _durationOptions.reduce((a, b) => (value - a).abs() < (value - b).abs() ? a : b);
+            });
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: _durationOptions.map((duration) => Text(
+              '$duration',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.black54,
               ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              elevation: isSelected ? 2 : 0,
-            ),
-          );
-        }).toList(),
-      ),
+            )).toList(),
+          ),
+        ),
+      ],
     );
   }
 }

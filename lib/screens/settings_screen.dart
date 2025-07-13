@@ -16,12 +16,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isMusicOn = true;
   double _soundVolume = 0.8;
   double _musicVolume = 0.6;
+  double _tiltSensitivity = 6.0;
   
   // Keys for SharedPreferences
   static const String _soundKey = 'sound_enabled';
   static const String _musicKey = 'music_enabled';
   static const String _soundVolumeKey = 'sound_volume';
   static const String _musicVolumeKey = 'music_volume';
+  static const String _tiltSensitivityKey = 'tilt_sensitivity';
 
   @override
   void initState() {
@@ -31,12 +33,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    
     setState(() {
       _isSoundOn = prefs.getBool(_soundKey) ?? true;
       _isMusicOn = prefs.getBool(_musicKey) ?? true;
       _soundVolume = prefs.getDouble(_soundVolumeKey) ?? 0.8;
       _musicVolume = prefs.getDouble(_musicVolumeKey) ?? 0.6;
+      _tiltSensitivity = prefs.getDouble(_tiltSensitivityKey) ?? 6.0;
     });
   }
 
@@ -64,6 +66,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _soundVolume = value as double;
         } else if (key == _musicVolumeKey) {
           _musicVolume = value as double;
+        } else if (key == _tiltSensitivityKey) {
+          _tiltSensitivity = value as double;
         }
       });
     }
@@ -198,14 +202,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       min: 0.0,
                                       max: 1.0,
                                       divisions: 10,
-                                      label: '${(_musicVolume * 100).toInt()}%',
-                                      onChanged: _isMusicOn
-                                          ? (value) {
-                                              _saveSetting(_musicVolumeKey, value);
-                                            }
-                                          : null,
-                                      activeColor: Colors.purple,
-                                      inactiveColor: Colors.purple[100],
+                                      label: (_musicVolume * 100).round().toString(),
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _musicVolume = value;
+                                        });
+                                      },
+                                      onChangeEnd: (value) {
+                                        _saveSetting(_musicVolumeKey, value);
+                                      },
+                                      activeColor: Colors.blue,
                                     ),
                                   ),
                                   const Icon(Icons.music_off, color: Colors.purple),
