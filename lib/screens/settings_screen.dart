@@ -268,7 +268,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 
                 const SizedBox(height: 20),
-                
+
+                // Gyro Controls Card
+                Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Gyro Controls',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Gyro Tilt Sensitivity',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              _tiltSensitivity.toStringAsFixed(0),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blueAccent,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: _tiltSensitivity,
+                          min: 1,
+                          max: 10,
+                          divisions: 9,
+                          label: _tiltSensitivity.toStringAsFixed(0),
+                          onChanged: (value) {
+                            setState(() {
+                              _tiltSensitivity = value;
+                            });
+                            _saveSetting(_tiltSensitivityKey, value);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
                 // Reset Button
                 Center(
                   child: ElevatedButton.icon(
@@ -299,6 +354,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         await _saveSetting(_musicKey, true);
                         await _saveSetting(_soundVolumeKey, 0.8);
                         await _saveSetting(_musicVolumeKey, 0.6);
+                        await _saveSetting(_tiltSensitivityKey, 6.0);
                         
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(

@@ -18,6 +18,7 @@ class _DeckDetailScreenState extends State<DeckDetailScreen> with SingleTickerPr
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _slideAnimation;
+  String _selectedGameMode = 'single'; // 'single' or 'team'
 
   @override
   void initState() {
@@ -81,6 +82,8 @@ class _DeckDetailScreenState extends State<DeckDetailScreen> with SingleTickerPr
       arguments: {
         'deck': _deck,
         'duration': _selectedDuration,
+        'teamNumber': 1, // Always start with Team 1
+        'gameMode': _selectedGameMode,
       },
     );
   }
@@ -245,6 +248,34 @@ class _DeckDetailScreenState extends State<DeckDetailScreen> with SingleTickerPr
                       const SizedBox(height: 16),
                       _buildDurationSelector(),
                       const SizedBox(height: 40),
+                      // Game Mode Selection
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('Single Team'),
+                              selected: _selectedGameMode == 'single',
+                              onSelected: (selected) {
+                                setState(() {
+                                  _selectedGameMode = 'single';
+                                });
+                              },
+                            ),
+                            const SizedBox(width: 16),
+                            ChoiceChip(
+                              label: const Text('Two Teams'),
+                              selected: _selectedGameMode == 'team',
+                              onSelected: (selected) {
+                                setState(() {
+                                  _selectedGameMode = 'team';
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                       // Start Game Button
                       SizedBox(
                         width: double.infinity,

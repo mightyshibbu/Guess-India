@@ -21,17 +21,24 @@ class GameScreen extends StatefulWidget {
 enum TiltState { idle, up, down }
 
 class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
+  String _gameMode = 'single'; // 'single' or 'team'
   // Dedicated player for last_seconds sound
   final AudioPlayer _lastSecondsPlayer = AudioPlayer();
   bool _isLastSecondsPlaying = false;
   DateTime _lastTiltTime = DateTime.fromMillisecondsSinceEpoch(0);
   // --- Hysteresis thresholds (angles in g, assuming -10 to 10 is -90° to 90°) ---
   // These are now computed using _tiltSensitivity for easier tuning
-  double get CORRECT_ENGAGE => -_tiltSensitivity;
-  double get CORRECT_DISENGAGE => -(_tiltSensitivity - 3.0); // Require much closer to neutral before re-engage (tighter hysteresis)
+  double get _tiltThreshold {
+    const double minThreshold = 1.0; // most sensitive
+    const double maxThreshold = 8.0; // least sensitive
+    return maxThreshold - ((_tiltSensitivity - 1) / 9) * (maxThreshold - minThreshold);
+  }
 
-  double get SKIP_ENGAGE => _tiltSensitivity;
-  double get SKIP_DISENGAGE => _tiltSensitivity - 3.0; // Require back to near-neutral before re-engage
+  double get CORRECT_ENGAGE => -_tiltThreshold;
+  double get CORRECT_DISENGAGE => -(_tiltThreshold - 2.0); // Require much closer to neutral before re-engage (tighter hysteresis)
+
+  double get SKIP_ENGAGE => _tiltThreshold;
+  double get SKIP_DISENGAGE => _tiltThreshold - 2.0; // Require back to near-neutral before re-engage
 
   // Hysteresis engagement flags
   bool _isCorrectEngaged = false;
@@ -79,6 +86,9 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   final Map<String, bool> _wordResults = {}; // word -> isCorrect
   // Prevent repeated scoring for the same word
   bool _hasScoredThisWord = false;
+
+  // Team number for multiplayer mode
+  int _teamNumber = 1;
   
   @override
   void initState() {
@@ -110,6 +120,8 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
     _deck = args['deck'] as Deck;
     _duration = args['duration'] as int;
+    _teamNumber = args['teamNumber'] ?? 1;
+    _gameMode = args['gameMode'] ?? 'single';
     _timeRemaining = _duration;
     _words.addAll(_deck.words);
     _remainingWords.addAll(_deck.words);
@@ -201,7 +213,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
             await _lastSecondsPlayer.setReleaseMode(ReleaseMode.loop);
             await _lastSecondsPlayer.play(AssetSource('sounds/last_seconds.mp3'));
           } catch (e) {
-            debugPrint('Error playing last_seconds: $e');
+  
           }
         } else if ((_timeRemaining > 10 || _timeRemaining == 0) && _isLastSecondsPlaying) {
           // Stop if time is above 10 or timer ended
@@ -229,14 +241,13 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     if (!_isGameStarted || _isCountdown || _isGameOver) return;
 
     final double z = event.z;
-    debugPrint('Accelerometer z: ' + z.toStringAsFixed(2));
     final now = DateTime.now();
 
     // --- Correct (tilt up) logic ---
     if (!_isCorrectEngaged && z < CORRECT_ENGAGE && !_hasScoredThisWord) {
       // Engage correct only if not already engaged, not already scored for this word, and after cooldown
       if (now.difference(_lastTiltTime).inMilliseconds >= 1000) {
-        debugPrint('Correct triggered at: ' + now.toIso8601String());
+        debugPrint('[CORRECT] z before: ' + z.toStringAsFixed(2));
         setState(() {
           _tiltState = TiltState.up;
           _isTiltedUp = true;
@@ -245,6 +256,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
           _hasScoredThisWord = true;
         });
         _onCorrect();
+        debugPrint('[CORRECT] z after: ' + z.toStringAsFixed(2));
         _lastTiltTime = now;
         _flashBackground(Colors.greenAccent);
         Vibration.hasVibrator().then((hasVibrator) {
@@ -276,7 +288,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     if (!_isSkipEngaged && z > SKIP_ENGAGE) {
       // Engage skip only if not already engaged and after cooldown
       if (now.difference(_lastTiltTime).inMilliseconds >= 1000) {
-        debugPrint('Skip triggered at: ' + now.toIso8601String());
+        debugPrint('[SKIP] z before: ' + z.toStringAsFixed(2));
         setState(() {
           _tiltState = TiltState.down;
           _isTiltedDown = true;
@@ -284,6 +296,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
           _isSkipEngaged = true;
         });
         _onSkip();
+        debugPrint('[SKIP] z after: ' + z.toStringAsFixed(2));
         _lastTiltTime = now;
         _flashBackground(Colors.orangeAccent);
         Vibration.hasVibrator().then((hasVibrator) {
@@ -333,12 +346,13 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     try {
       await _audioPlayer.play(AssetSource('sounds/$sound.mp3'));
     } catch (e) {
-      debugPrint('Error playing sound: $e');
+  
     }
   }
 
   void _onCorrect() {
     _playSound('correct');
+    debugPrint('[WORD MARKED] CORRECT: $_currentWord');
     setState(() {
       _score += 10;
       _correctCount++;
@@ -349,6 +363,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
 
   void _onSkip() {
     _playSound('skip');
+    debugPrint('[WORD MARKED] SKIP: $_currentWord');
     setState(() {
       _skippedCount++;
     });
@@ -377,6 +392,7 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     // Navigate to results screen after a short delay
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
+      final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
       Navigator.pushReplacementNamed(
         context,
         ResultsScreen.routeName,
@@ -386,6 +402,11 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
           'skippedCount': _skippedCount,
           'wordResults': _wordResults,
           'deck': _deck,
+          'teamNumber': _teamNumber,
+          'gameMode': _gameMode,
+          if (args != null && args['team1Score'] != null) 'team1Score': args['team1Score'],
+          if (args != null && args['team1WordResults'] != null) 'team1WordResults': args['team1WordResults'],
+          'duration': _duration,
         },
       );
     });
@@ -456,31 +477,49 @@ class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   Widget _buildGameContent() {
     if (_isCountdown) {
       return Center(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: Container(
-            key: ValueKey<int>(_countdownValue),
-            width: 140,
-            height: 140,
-            decoration: BoxDecoration(
-              color: const Color(0xFF45B7D1).withOpacity(0.08),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: const Color(0xFF45B7D1),
-                width: 4,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_gameMode == 'team')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20.0),
+                child: Text(
+                  _teamNumber == 1 ? 'Team A' : 'Team B',
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepPurple,
+                    letterSpacing: 1.2,
+                  ),
+                ),
               ),
-            ),
-            child: Center(
-              child: Text(
-                '$_countdownValue',
-                style: const TextStyle(
-                  fontSize: 64,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF45B7D1),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Container(
+                key: ValueKey<int>(_countdownValue),
+                width: 140,
+                height: 140,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF45B7D1).withOpacity(0.08),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF45B7D1),
+                    width: 4,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    '$_countdownValue',
+                    style: const TextStyle(
+                      fontSize: 64,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF45B7D1),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ),
       );
     } else if (_isGameOver) {
